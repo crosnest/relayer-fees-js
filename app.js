@@ -1,13 +1,26 @@
 'use strict';
 
 const config = {
-    "chain": "juno-1",
-    "addr_prefix": "juno",
-    "rpc": "https://rpc-juno-old-archive.cosmoapi.com",
-    "output": "/home/ubuntu/output.csv",    // must be .csv
-    "startBlock": 1,                        // must not be 0
-    "maxBlocks": 0                          // 0 to walk until latest block
+    "chain": "dydx-mainnet-1",
+    "addr_prefix": "dydx",
+    "rpc": "https://dydx-mainnet-full-rpc.public.blastapi.io",
+    // "rpc": "https://dydx-dao-archive-rpc.polkachu.com/websocket",
+    "output": "/home/dpierret/dydx-relayers.csv",    // must be .csv
+    
+    // 1st April : 12186000
+    // 1st May : 14515000
+    // 1st June : 17075000
+    // 1st Jully : 19343000
+    // 1st August : 21690000
+    // 1st September : 24176500
+    // 1st October : 26565000
+    // 1st November : 29110000
+    "startBlock": 24176500,                        // must not be 0
+    "maxBlocks": 29110000 - 24176500                // 0 to walk until latest block
 }
+
+const { Tendermint37Client } = require("@cosmjs/tendermint-rpc")
+const { createProtobufRpcClient, QueryClient } = require("@cosmjs/stargate")
 
 const { Tx } = require('cosmjs-types/cosmos/tx/v1beta1/tx');
 const { PubKey } = require('cosmjs-types/cosmos/crypto/secp256k1/keys');
@@ -105,6 +118,15 @@ async function blockwalker(maxblocks) {
     var data = [];
     var block = 0;
     var repeat = true;
+
+    console.log("establishing connection")
+    const client = await Tendermint37Client.connect(config.rpc)
+    console.log("client = ", client)
+    const queryClient = new QueryClient(client)
+    console.log("queryclient = ", queryClient)
+    const rpcClient = createProtobufRpcClient(queryClient)
+
+
     while (repeat) {
         var valid = true;
         if (block == 0) {
@@ -112,7 +134,9 @@ async function blockwalker(maxblocks) {
             console.log(`-> Start block: ${config.startBlock}, end block: ${config.startBlock + maxblocks} - walking blocks...`);
         }
         try {
-            var res = await axios.get(config.rpc + '/block?height=' + block);
+            //var res = await client.blockResults(block)
+            var res = await client.block(block)
+            //var res = await axios.get(config.rpc + '/block?height=' + block);
         }
         catch (e) {
             console.log(e);
@@ -122,14 +146,16 @@ async function blockwalker(maxblocks) {
         }
         if (valid) {
             block++;
-            let txs = res.data.result.block.data.txs;
+            let txs = res.block.txs;
             let ibcCounter = 0;
             txs.forEach((tx) => {
                 var isIbcTx = false;
                 let buff = Buffer.from(tx, 'base64');
+                try {
                 let msgs = Tx.decode(buff).body.messages;
                 msgs.forEach((msg) => {
                     if (msg.typeUrl.includes('/ibc') && msg.typeUrl != "/ibc.applications.transfer.v1.MsgTransfer") {
+                            console.log("Found IBC Tx")
                         isIbcTx = true
                     }
                 });
@@ -140,6 +166,10 @@ async function blockwalker(maxblocks) {
                     results.push(log_data);
 
                     ibcCounter++;
+                    }
+                }
+                catch(e) {
+                    //console.log(e)
                 }
             });
             if (ibcCounter != 0) {
@@ -183,6 +213,7 @@ async function getLastBlock() {
 }
 
 async function main() {
+    console.log("Start")
     var maxblocks = config.maxBlocks;
     if (maxblocks == 0) {
         var latest = await getLastBlock();
